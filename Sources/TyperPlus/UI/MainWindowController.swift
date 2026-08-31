@@ -25,8 +25,9 @@ final class MainWindowController {
         // back" to a larger size. The window stays freely resizable down to `minSize`.
         if #available(macOS 13.0, *) { host.sizingOptions = [] }
 
+        let defaultSize = NSSize(width: 1120, height: 740)
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 740),
+            contentRect: NSRect(origin: .zero, size: defaultSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false)
@@ -39,7 +40,30 @@ final class MainWindowController {
         win.isReleasedWhenClosed = false          // mandatory: reused on reopen
         win.minSize = NSSize(width: 720, height: 560)
         win.backgroundColor = NSColor(Theme.cream)   // single source of truth (DesignSystem)
+
+        // Assigning `contentViewController` above silently shrinks the window to whatever
+        // (near-zero) size the SwiftUI hosting view reports before its first layout pass —
+        // re-assert the real size before centering.
+        win.setContentSize(defaultSize)
         win.center()
+
+        // `setFrameAutosaveName` immediately restores whatever frame string was last
+        // persisted, clobbering the good frame just set above. A corrupted/degenerate saved
+        // frame (this shipped once as "719 676 1 1", collapsed from the SwiftUI hosting
+        // view's pre-layout size, above) can NEVER come from legitimate interactive
+        // resizing — the user can't drag a window below `minSize` — so any saved size under
+        // `minSize` is definitely this bug, not a real preference. NSWindow's own restore
+        // path clamps such a frame UP to exactly `minSize` instead of leaving it at its
+        // degenerate saved size, so checking the frame *after* restoring can miss it (720 is
+        // not `< 720`) — the corrupted value must be purged from the raw saved string BEFORE
+        // `setFrameAutosaveName` ever gets to restore it.
+        let autosaveKey = "NSWindow Frame TyperPlusMain"
+        if let saved = UserDefaults.standard.string(forKey: autosaveKey) {
+            let parts = saved.split(separator: " ").compactMap { Double($0) }
+            if parts.count >= 4, (parts[2] < Double(win.minSize.width) || parts[3] < Double(win.minSize.height)) {
+                UserDefaults.standard.removeObject(forKey: autosaveKey)
+            }
+        }
         win.setFrameAutosaveName("TyperPlusMain")
 
         self.window = win
