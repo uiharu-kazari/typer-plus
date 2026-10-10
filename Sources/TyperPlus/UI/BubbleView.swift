@@ -109,7 +109,6 @@ struct BubbleView: View {
     var onHeightChange: (CGFloat) -> Void = { _ in }
 
     @State private var ctaHover = false
-    @State private var brandHover = false
     @State private var modeHover = false
     @State private var copied = false
     @State private var textContentHeight: CGFloat = 0
@@ -349,32 +348,19 @@ struct BubbleView: View {
     // isMovableByWindowBackground you can grab the bubble almost anywhere and move it.
     private var header: some View {
         HStack(spacing: Spacing.xs) {
-            Button { model.openMainWindow() } label: {
-                HStack(spacing: Spacing.xs) {
-                    TyperMark()
-                        .frame(width: 18, height: 18)
-                        .accessibilityHidden(true)
-                    Text("Typer+")
-                        .font(AppFont.inter(.bold, 15.5)).tracking(-0.3)
-                        .foregroundStyle(Theme.textPrimary)
-                        .fixedSize()
-                }
-                .padding(.horizontal, 6).frame(height: 24)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(brandHover ? Theme.hoverFill : .clear))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, -6)   // keep the logo's visual position; the hover chip extends past it
-            .onHover { h in
-                brandHover = h
-                if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-            }
-            .animation(Motion.snappy, value: brandHover)
-            .help("Open main window")
+            TyperMark()
+                .frame(width: 18, height: 18)
+                .accessibilityHidden(true)
+                .allowsHitTesting(false)
+            Text("Typer+")
+                .font(AppFont.inter(.bold, 15.5)).tracking(-0.3)
+                .foregroundStyle(Theme.textPrimary)
+                .fixedSize()
+                .allowsHitTesting(false)
 
             Spacer(minLength: 0)
 
+            HeaderIconButton(system: "macwindow", help: "Open main window") { model.openMainWindow() }
             modeMenu
             HeaderIconButton(system: "text.alignleft",
                              help: textBoxOpen ? "Collapse text box" : "Expand text box",
