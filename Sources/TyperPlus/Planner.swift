@@ -377,7 +377,7 @@ final class Planner {
         return consumed
     }
 
-    // MARK: - Grammar / homophone slips (corrected on the spot; Max Stealth may leave subtle ones)
+    // MARK: - Grammar / homophone slips (always corrected on the spot — the final text is exactly the source)
 
     /// Type the next 2-4 words, pause, then delete them — a false start. The main loop
     /// then retypes them normally, so the final text is unchanged.
@@ -404,35 +404,23 @@ final class Planner {
         let word = String(chars[i..<j])
         guard word.count >= 1, let wrong = Typos.confusableVariant(for: word, rng: rng) else { return nil }
 
-        // Article swaps (a/an/the) are too visible to leave; only subtle homophones are
-        // ever left in, and only by Max Stealth (its job is an organically-imperfect Docs
-        // history). Everyday modes still MAKE slips for churn but always tidy them up.
-        let isArticle = ["a", "an", "the"].contains(word.lowercased())
-        let canLeave = profile.mode == .maxStealth && !isArticle
-        // The very fast modes still slip (the user wants flaws kept) but churn a little
-        // less so the high-speed cadence isn't dominated by visible corrections.
+        // Slips are only churn: every one is corrected on the spot, so the output is always
+        // byte-for-byte the source text (no residue in ANY mode, Max Stealth included).
+        // The very fast modes churn a little less so their cadence isn't dominated by fixes.
         let isVeryFast = profile.mode == .ultraFast || profile.mode == .maxSpeed
-        let considerProb = canLeave ? 0.45 : (isVeryFast ? 0.10 : 0.16)
+        let considerProb = isVeryFast ? 0.10 : 0.16
         guard rng.bernoulli(considerProb) else { return nil }
 
         let beforeChar: Character? = i > 0 ? chars[i - 1] : nil
         typeRun(Array(wrong), prev: beforeChar)
 
-        func fixNow() {
-            emitBackspaces(wrong.count, firstIki: rng.uniform(160, 420))
-            typeRun(Array(word), prev: beforeChar)
-            armPostError()
-        }
         // Always correct on the spot (caret is at the end — every app honors that). We NEVER
         // defer to an end-of-pass jump-back fix: backward ← caret navigation isn't honored
         // identically across real apps (autocomplete, the user's own cursor moves, field
-        // quirks), which made the fix land in the wrong place and corrupt the output. Max
-        // Stealth may instead LEAVE a subtle slip in place (navigation-free, intentional).
-        if canLeave, rng.unit() < 0.45 {
-            // leave it in — safe, intentional residue (Max Stealth only)
-        } else {
-            fixNow()
-        }
+        // quirks), which made the fix land in the wrong place and corrupt the output.
+        emitBackspaces(wrong.count, firstIki: rng.uniform(160, 420))
+        typeRun(Array(word), prev: beforeChar)
+        armPostError()
         return word.count
     }
 

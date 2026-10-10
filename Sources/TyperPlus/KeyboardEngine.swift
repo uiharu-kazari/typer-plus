@@ -24,14 +24,16 @@ final class KeyboardEngine {
 
     private let source: CGEventSource?
 
-    /// Pure-Unicode path (virtualKey 0) for ALL characters — DEFAULT ON for correctness.
-    /// The keycode path posted a REAL US-QWERTY virtual key alongside the Unicode string;
-    /// for any char not on the US layout (shifted punctuation, accents, smart quotes, emoji,
-    /// or anything routed through the last-resort fallback keycode) that real keycode could
-    /// COMPETE with the Unicode string and a code-reading / non-US-layout field would render
-    /// the wrong glyph (stray letters / periods — the reported corruption). vk 0 + the exact
-    /// Unicode string is unambiguous in every field. Flip OFF only for keycode "authenticity"
-    /// in a context that's verified to honor it.
+    /// Always attach the exact Unicode string (layout-independent glyph). When ON (default),
+    /// characters with a real US-QWERTY key ALSO carry that key's virtual keycode; only chars
+    /// with no US key (accents, smart quotes, emoji…) use virtualKey 0 + the string alone.
+    ///
+    /// The keycode matters for REMOTE DESKTOP clients (Chrome Remote Desktop, etc.): they
+    /// forward the physical key, not the Unicode string, so a bare virtualKey 0 turns every
+    /// character into keycode 0 = "A". Native apps / Citrix read the Unicode string, so the
+    /// extra real keycode is harmless there. (Chars with no US key deliberately keep vk 0
+    /// instead of a made-up fallback key, which could compete with the string and render a
+    /// wrong glyph.)
     var forceUnicodeOnly = true
     /// Recheck before each key press; releases remain allowed to avoid stuck keys.
     var canPostPress: () -> Bool = { true }
@@ -103,9 +105,9 @@ final class KeyboardEngine {
     @discardableResult
     private func postChar(_ ch: Character, down: Bool) -> Bool {
         guard !down || canPostPress() else { return false }
-        // Default (forceUnicodeOnly): vk 0 + the exact Unicode string — the only
-        // specification, so no keycode can compete and render a wrong glyph.
-        let stroke = forceUnicodeOnly ? nil : KeyMap.stroke(for: ch)
+        // Real US keycode whenever the char has one (so keycode-forwarding remote desktops
+        // see the right key); otherwise vk 0 (forceUnicodeOnly) or a plausible fallback key.
+        let stroke = KeyMap.stroke(for: ch)
         let vk = stroke?.code ?? (forceUnicodeOnly ? 0 : KeyMap.fallbackCode(for: ch))
         guard let e = CGEvent(keyboardEventSource: source, virtualKey: vk, keyDown: down) else { return false }
         if down {

@@ -103,8 +103,7 @@ enum TyperPlusSelfTest {
 
         print("Self-test 4: grammar/end-review never corrupts beyond a single confusable")
         do {
-            // Source uses the CORRECT forms; a slip + end-review may occasionally
-            // leave one wrong, but must never produce unrelated corruption.
+            // Source uses the CORRECT forms; every slip is corrected, so the output is identical.
             let text = "its a test and you're right about their plan, then we go too."
             var maxEdits = 0
             for _ in 0..<60 {
@@ -112,9 +111,8 @@ enum TyperPlusSelfTest {
                 let out = simulate(plan)
                 maxEdits = max(maxEdits, levenshtein(out, text))
             }
-            // Grammar slips now distribute (immediate / end-review / a few left in), so a
-            // small residue of un-fixed confusables is expected and bounded.
-            check(maxEdits <= 12, "grammar residue bounded (max edit distance \(maxEdits) ≤ 12)")
+            // Every grammar/homophone slip is corrected on the spot: output == source, always.
+            check(maxEdits == 0, "grammar slips leave no residue (max edit distance \(maxEdits) == 0)")
         }
 
         print("Self-test 5: timing statistics land on the research targets")

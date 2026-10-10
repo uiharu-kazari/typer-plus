@@ -64,10 +64,10 @@ struct SettingsView: View {
                     }
                 }
 
-                card("Residue policy") {
+                card("Accuracy") {
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "shield.lefthalf.filled").foregroundStyle(Theme.accent)
-                        Text("Max Stealth deliberately leaves a few subtle, uncorrected slips (homophone / grammar only) so a Docs version-history replay looks organically composed. Careful, Ultra Fast and Max Speed keep output clean — every typo and grammar slip is corrected.")
+                        Text("Typer+ always types your text exactly as given. Any slip it makes along the way (in any mode) is deleted and retyped correctly, so nothing is ever left wrong in the final text.")
                             .font(Typo.caption).foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
