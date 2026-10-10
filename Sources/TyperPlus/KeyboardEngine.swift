@@ -63,18 +63,29 @@ final class KeyboardEngine {
     // Modifiers mirror ONLY what the OS actually saw: the flag is set after a successful
     // post (down) and always cleared on release. A dropped CGEvent can therefore never
     // leave a modifier "stuck" in our mirror and silently shift every following character.
-    func shiftDown()  { if postCode(KeyMap.shift,  down: true)  { heldFlags.insert(.maskShift) } }
-    func shiftUp()    { heldFlags.remove(.maskShift);  _ = postCode(KeyMap.shift,  down: false) }
-    func optionDown() { if postCode(KeyMap.option, down: true)  { heldFlags.insert(.maskAlternate) } }
-    func optionUp()   { heldFlags.remove(.maskAlternate); _ = postCode(KeyMap.option, down: false) }
+    //
+    // Real keyboards report modifiers as `flagsChanged` events (carrying the new flag state
+    // + the left/right device bit), NOT as keyDown/keyUp. A plain keyDown for keycode 56 is
+    // ignored by Chrome and by remote-desktop clients that track modifier state themselves,
+    // so e.g. "?" arrived as "/" in Chrome Remote Desktop. Post the genuine event type.
+    func shiftDown()  { if postModifier(KeyMap.shift,  flag: .maskShift,     device: 0x02, down: true)  { heldFlags.insert(.maskShift) } }
+    func shiftUp()    { heldFlags.remove(.maskShift);     _ = postModifier(KeyMap.shift,  flag: .maskShift,     device: 0x02, down: false) }
+    func optionDown() { if postModifier(KeyMap.option, flag: .maskAlternate, device: 0x20, down: true)  { heldFlags.insert(.maskAlternate) } }
+    func optionUp()   { heldFlags.remove(.maskAlternate); _ = postModifier(KeyMap.option, flag: .maskAlternate, device: 0x20, down: false) }
 
     /// Idempotent safety reset — release any modifier we might be holding and clear the
     /// mirror. Posting an already-up modifier is a no-op for the OS, so calling this on
     /// abort/finish guarantees a run can never leave Shift/Option stuck for the user's own
     /// subsequent typing. (Releasing an already-up key never produces a character.)
     func resetModifiers() {
-        if heldFlags.contains(.maskShift)     { _ = postCode(KeyMap.shift,  down: false) }
-        if heldFlags.contains(.maskAlternate) { _ = postCode(KeyMap.option, down: false) }
+        if heldFlags.contains(.maskShift) {
+            heldFlags.remove(.maskShift)
+            _ = postModifier(KeyMap.shift, flag: .maskShift, device: 0x02, down: false)
+        }
+        if heldFlags.contains(.maskAlternate) {
+            heldFlags.remove(.maskAlternate)
+            _ = postModifier(KeyMap.option, flag: .maskAlternate, device: 0x20, down: false)
+        }
         heldFlags = []
     }
 
@@ -126,6 +137,23 @@ final class KeyboardEngine {
         guard !down || canPostPress() else { return false }
         guard let e = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down) else { return false }
         finalize(e, flags: heldFlags)
+        e.post(tap: .cghidEventTap)
+        return true
+    }
+
+    /// A modifier press/release as a real `flagsChanged` event: `flag` (+ the device-dependent
+    /// left-key bit) is added on press, removed on release, on top of the other held modifiers.
+    @discardableResult
+    private func postModifier(_ code: CGKeyCode, flag: CGEventFlags, device: UInt64, down: Bool) -> Bool {
+        guard !down || canPostPress() else { return false }
+        guard let e = CGEvent(source: source) else { return false }
+        e.type = .flagsChanged
+        e.setIntegerValueField(.keyboardEventKeycode, value: Int64(code))
+        var flags = heldFlags
+        flags.remove(flag)
+        if down { flags.insert(flag); flags.insert(CGEventFlags(rawValue: device)) }
+        e.flags = flags
+        e.timestamp = mach_absolute_time()
         e.post(tap: .cghidEventTap)
         return true
     }
