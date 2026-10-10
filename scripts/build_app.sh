@@ -65,7 +65,7 @@ codesign --verify --strict --verbose=2 "${APP}" || true
 # (single-instance launch would otherwise just re-activate a stale running copy).
 pkill -9 -f "Typer\+.app/Contents/MacOS/TyperPlus" 2>/dev/null && { echo "==> Quit running Typer+"; sleep 1; } || true
 
-INSTALL_DIR="${TYPERPLUS_INSTALL_DIR:-$HOME/Desktop}"
+INSTALL_DIR="${TYPERPLUS_INSTALL_DIR:-/Applications}"
 DEST="${INSTALL_DIR}/${APP}"
 if [[ -d "${INSTALL_DIR}" && -w "${INSTALL_DIR}" ]]; then
     rm -rf "${DEST}"

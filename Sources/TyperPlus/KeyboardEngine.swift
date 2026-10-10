@@ -33,6 +33,8 @@ final class KeyboardEngine {
     /// Unicode string is unambiguous in every field. Flip OFF only for keycode "authenticity"
     /// in a context that's verified to honor it.
     var forceUnicodeOnly = true
+    /// Recheck before each key press; releases remain allowed to avoid stuck keys.
+    var canPostPress: () -> Bool = { true }
 
     /// Modifier flags currently "held" (driven by shiftDown/shiftUp from the planner).
     /// Every posted event reflects these, exactly like real hardware while Shift is held.
@@ -90,6 +92,7 @@ final class KeyboardEngine {
 
     /// Low-level single keycode post with explicit flags (used by `pasteShortcut`).
     private func post(_ code: CGKeyCode, down: Bool, flags: CGEventFlags) {
+        guard !down || canPostPress() else { return }
         guard let e = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down) else { return }
         e.flags = flags
         e.setIntegerValueField(.keyboardEventAutorepeat, value: 0)
@@ -99,6 +102,7 @@ final class KeyboardEngine {
 
     @discardableResult
     private func postChar(_ ch: Character, down: Bool) -> Bool {
+        guard !down || canPostPress() else { return false }
         // Default (forceUnicodeOnly): vk 0 + the exact Unicode string — the only
         // specification, so no keycode can compete and render a wrong glyph.
         let stroke = forceUnicodeOnly ? nil : KeyMap.stroke(for: ch)
@@ -117,6 +121,7 @@ final class KeyboardEngine {
 
     @discardableResult
     private func postCode(_ code: CGKeyCode, down: Bool) -> Bool {
+        guard !down || canPostPress() else { return false }
         guard let e = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down) else { return false }
         finalize(e, flags: heldFlags)
         e.post(tap: .cghidEventTap)

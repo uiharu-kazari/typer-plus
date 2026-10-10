@@ -2,7 +2,7 @@ import AppKit
 import Carbon   // IsSecureEventInputEnabled()
 
 /// Central coordinator: owns every subsystem, enforces the permission gate, runs
-/// the safety watchdog, and drives a typing run (countdown → play). Lives for the
+/// the safety watchdog, and drives a typing run (focus handoff → play). Lives for the
 /// whole app lifetime.
 final class AppController: NSObject, NSApplicationDelegate {
 
@@ -13,7 +13,6 @@ final class AppController: NSObject, NSApplicationDelegate {
     private lazy var player = Player(engine: engine)
     private let menu = MenuBarController()
     private let hotkey = Hotkey()
-    private let countdown = CountdownHUD()
 
     let appModel = AppModel()
     private lazy var mainWindow = MainWindowController(model: appModel)
@@ -23,7 +22,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var permissionPoll: Timer?
     private var safetyWatchdog: Timer?
     private var isTyping = false
-    private var runGeneration = 0   // invalidates a stale countdown completion (start→stop→start)
+    private var runGeneration = 0   // invalidates a stale start callback (start→stop→start)
     private var lastRunEndedAt: TimeInterval = 0   // debounce: ⌘⌥T right after a run must not retype
 
     // MARK: - Lifecycle
@@ -50,6 +49,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         killSwitch.onTripleEsc = { [weak self] in self?.stopTyping() }
 
         player.pauseProvider = { [weak self] in self?.shouldHold() ?? true }
+        engine.canPostPress = { [weak self] in !(self?.ownAppFocused ?? true) }
         player.onFinish = { [weak self] in self?.finishTyping() }
         player.onPausedChange = { [weak self] _ in self?.refreshUI() }
 
@@ -81,7 +81,6 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        countdown.cancel()
         player.abort()
         stopSafetyWatchdog()
         killSwitch.stop()
@@ -113,7 +112,11 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     /// Safe to inject right now? Only if the kill switch is live and Secure Input
     /// isn't blinding it (a password field would swallow keys and break the abort).
-    private var safeToRun: Bool { killSwitch.isArmed && !secureInputActive }
+    private var ownAppFocused: Bool {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+    }
+
+    private var safeToRun: Bool { killSwitch.isArmed && !secureInputActive && !ownAppFocused }
 
     /// Player hold condition: hold ONLY while it isn't safe to inject — i.e. the
     /// kill switch is down or Secure Input (a password field) is swallowing keys.
@@ -139,14 +142,14 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     // MARK: - Typing run
 
-    /// Plan and type `text`: countdown → play. Honors permission gate + kill switch.
+    /// Plan and type `text`: focus handoff → play. Honors permission gate + kill switch.
     ///
     /// Formatting cleanup runs HERE — the single shared entry point used by the bubble,
     /// the menu paste box, the clipboard hotkey, and the main window — so what gets
     /// typed is identical regardless of source. `TextCleanup.clean` is a no-op when the
     /// Settings toggle is off.
-    func beginTyping(_ text: String, quick: Bool = false) {
-        // Single in-flight run: a second start (during countdown or mid-type) is ignored,
+    func beginTyping(_ text: String) {
+        // Single in-flight run: a second start (while starting or mid-type) is ignored,
         // never silently merged/replaced into corrupted output. ⌘⌥T stops first, then starts.
         guard !isTyping && !player.isRunning else { return }
         // Post-run debounce, enforced HERE (the one chokepoint every start path flows through:
@@ -181,7 +184,6 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         menu.closePasteBox()
         NSApp.deactivate()           // hand focus back to the user's target app/field
-        countdown.cancel()
         // (No player.abort() here — the guard above already proved !player.isRunning.)
 
         engine.forceUnicodeOnly = settings.forceUnicodeOnly
@@ -221,8 +223,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         startSafetyWatchdog()
         refreshUI()
 
-        let secs = Int((quick ? settings.quickCountdownSeconds : settings.countdownSeconds).rounded())
-        countdown.start(seconds: secs, completion: { [weak self] in
+        DispatchQueue.main.async { [weak self] in
             guard let self = self, gen == self.runGeneration, self.isTyping else { return }
             // Secure Input (a password field) or a downed kill switch at the moment of delivery:
             // beep so the run isn't silently dropped (the user sees it "finish" doing nothing).
@@ -242,9 +243,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 self.player.play(plan)
                 self.refreshUI()
             }
-        }, cancelled: { [weak self] in
-            self?.finishTyping()
-        })
+        }
     }
 
     private func finishTyping() {
@@ -335,10 +334,10 @@ final class AppController: NSObject, NSApplicationDelegate {
         guard let s = NSPasteboard.general.string(forType: .string), !s.isEmpty else {
             NSSound.beep(); return
         }
-        beginTyping(s, quick: true)
+        beginTyping(s)
     }
 
-    /// ⌘⌥T behaves as a toggle: if a run is already underway (countdown or typing),
+    /// ⌘⌥T behaves as a toggle: if a run is already underway (starting or typing),
     /// pressing it again cancels it; otherwise it starts typing the clipboard. The
     /// "don't restart right after a stop" debounce lives in beginTyping(), so it covers
     /// this AND every other start path uniformly.
@@ -347,8 +346,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     @objc func stopTyping() {
-        runGeneration += 1            // invalidate any in-flight countdown completion
-        countdown.cancel()
+        runGeneration += 1            // invalidate any in-flight start callback
         if player.isRunning { player.abort() } else { finishTyping() }
     }
 

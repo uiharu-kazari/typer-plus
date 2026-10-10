@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
-    @State private var countdown = Settings.shared.countdownSeconds
     @State private var preventSleep = Settings.shared.preventDisplaySleep
     @State private var forceUnicode = Settings.shared.forceUnicodeOnly
     @State private var reliableDelivery = Settings.shared.reliableDelivery
@@ -24,19 +23,6 @@ struct SettingsView: View {
                 }
 
                 card("Typing") {
-                    settingRow("Countdown before typing") {
-                        HStack(spacing: Spacing.sm) {
-                            Slider(value: $countdown, in: 0...10, step: 1) { _ in
-                                Settings.shared.countdownSeconds = countdown
-                            }
-                            .frame(width: 160)
-                            Text("\(Int(countdown))s")
-                                .font(Typo.caption.monospacedDigit())
-                                .foregroundStyle(Theme.textSecondary)
-                                .frame(width: 28, alignment: .trailing)
-                        }
-                    }
-                    Hairline()
                     settingRow("Prevent display sleep while typing") {
                         Toggle("", isOn: $preventSleep)
                             .labelsHidden().toggleStyle(.switch).tint(Theme.accent)

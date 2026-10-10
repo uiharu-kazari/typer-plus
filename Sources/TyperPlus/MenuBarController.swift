@@ -17,6 +17,7 @@ final class MenuBarController: NSObject {
 
     private var statusItem: NSStatusItem!
     private weak var controller: AppController?
+    private var contextMenu: NSMenu?
 
     private var statusLine: NSMenuItem!
     private var typeItem: NSMenuItem!
@@ -36,6 +37,10 @@ final class MenuBarController: NSObject {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "keyboard",
                                            accessibilityDescription: "Typer+")
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusItemClicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        statusItem.button?.toolTip = "Click to open dashboard · Right-click for menu"
 
         // Popover wiring.
         pasteVC.onType = { [weak controller] text in
@@ -53,6 +58,13 @@ final class MenuBarController: NSObject {
         statusLine = NSMenuItem(title: "Typer+", action: nil, keyEquivalent: "")
         statusLine.isEnabled = false
         menu.addItem(statusLine)
+        menu.addItem(.separator())
+
+        let dashboardItem = NSMenuItem(title: "Open dashboard",
+                                       action: #selector(AppController.showMainWindow),
+                                       keyEquivalent: "")
+        dashboardItem.target = controller
+        menu.addItem(dashboardItem)
         menu.addItem(.separator())
 
         typeItem = NSMenuItem(title: "Type pasted text…",
@@ -125,7 +137,17 @@ final class MenuBarController: NSObject {
         quitItem.target = controller
         menu.addItem(quitItem)
 
-        statusItem.menu = menu
+        contextMenu = menu
+    }
+
+    @objc private func statusItemClicked() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            guard let button = statusItem.button, let menu = contextMenu else { return }
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+        } else {
+            closePasteBox()
+            controller?.showMainWindow()
+        }
     }
 
     /// Show the paste-box popover anchored to the status item.

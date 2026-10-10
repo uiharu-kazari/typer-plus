@@ -73,7 +73,7 @@ You need the Swift toolchain on macOS 14 or newer. I built and tested it on macO
 
 ```bash
 ./scripts/build_app.sh
-open "$HOME/Desktop/Typer+.app"   # the script prints the real path
+open "/Applications/Typer+.app"   # the script prints the real path
 ```
 
 A keyboard icon shows up in your menu bar. Running `swift build` on its own only gives you the bare binary. The menu bar item and the global hotkey only work from the assembled `.app` bundle, which is what the script builds.
@@ -107,7 +107,7 @@ That single grant covers posting keystrokes and watching for the stop gesture. I
 ## Using it
 
 1. Copy or write the text you want typed.
-2. Click the menu bar icon, choose **Type pasted text**, paste your text, pick a mode, and hit **Type this**. Or skip all that and press **Cmd+Option+T** to type whatever is already on your clipboard.
+2. Click the menu bar icon to bring the dashboard to the front (including when closed or minimized). Paste your text and use **Remove newlines** to join lines with spaces before typing. Right-click the icon for the menu, including **Type pasted text** and **Open dashboard**. Or press **Cmd+Option+T** to type whatever is already on your clipboard.
 3. You get a short countdown. Use it to click into the field you want the text to land in. Typing starts when the countdown ends.
 
 To stop, press **Esc three times fast**, or pick **Stop typing** from the menu. There is also a URL scheme for scripting: `open typerplus://clipboard` types the clipboard, `open typerplus://stop` stops.

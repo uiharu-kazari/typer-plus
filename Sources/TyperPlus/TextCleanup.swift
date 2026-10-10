@@ -18,6 +18,11 @@ import Foundation
 ///     (the engine types those fine and the user may want them).
 enum TextCleanup {
 
+    /// Join lines with a space without applying the automatic formatting cleanup.
+    static func removingNewlines(_ text: String) -> String {
+        text.replacingOccurrences(of: "[\\t\\p{Zs}]*\\R[\\s]*", with: " ", options: .regularExpression)
+    }
+
     /// Settings-gated public entry point. Call this everywhere text enters the
     /// typing pipeline. Returns the input unchanged when cleanup is disabled.
     static func clean(_ text: String, enabled: Bool = Settings.shared.cleanupEnabled) -> String {

@@ -17,8 +17,15 @@ final class PasteBoxViewController: NSViewController {
 
         let title = NSTextField(labelWithString: "Paste text to type")
         title.font = .systemFont(ofSize: 14, weight: .semibold)
-        title.frame = NSRect(x: 16, y: 286, width: 388, height: 20)
+        title.frame = NSRect(x: 16, y: 286, width: 240, height: 20)
         root.addSubview(title)
+
+        let removeNewlinesButton = NSButton(title: "Remove newlines", target: self,
+                                            action: #selector(removeNewlinesTapped))
+        removeNewlinesButton.bezelStyle = .rounded
+        removeNewlinesButton.frame = NSRect(x: 264, y: 282, width: 140, height: 28)
+        removeNewlinesButton.toolTip = "Join all lines with spaces"
+        root.addSubview(removeNewlinesButton)
 
         // Paste box (plain text, scrollable).
         let scroll = NSScrollView(frame: NSRect(x: 16, y: 96, width: 388, height: 182))
@@ -68,7 +75,7 @@ final class PasteBoxViewController: NSViewController {
         typeButton.frame = NSRect(x: 300, y: 52, width: 104, height: 32)
         root.addSubview(typeButton)
 
-        let hint = NSTextField(labelWithString: "Click Type, then click your target field during the countdown. Stop: Esc Esc Esc.")
+        let hint = NSTextField(labelWithString: "Focus your target field before starting. Stop: Esc Esc Esc.")
         hint.font = .systemFont(ofSize: 10)
         hint.textColor = .tertiaryLabelColor
         hint.frame = NSRect(x: 16, y: 10, width: 388, height: 26)
@@ -103,5 +110,14 @@ final class PasteBoxViewController: NSViewController {
         let text = textView.string
         guard !text.isEmpty else { return }
         onType?(text)
+    }
+
+    @objc private func removeNewlinesTapped() {
+        let replacement = TextCleanup.removingNewlines(textView.string)
+        guard replacement != textView.string else { return }
+        let range = NSRange(location: 0, length: (textView.string as NSString).length)
+        guard textView.shouldChangeText(in: range, replacementString: replacement) else { return }
+        textView.textStorage?.replaceCharacters(in: range, with: replacement)
+        textView.didChangeText()
     }
 }

@@ -13,6 +13,7 @@ final class MainWindowController {
 
     func showWindow() {
         if let w = window {
+            if w.isMiniaturized { w.deminiaturize(nil) }
             w.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
