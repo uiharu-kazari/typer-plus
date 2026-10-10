@@ -88,6 +88,7 @@ final class AppModel: ObservableObject {
 
     // Navigation
     @Published var selection: Screen = .home
+    @Published var composerText = ""
 
     // Engine state (pushed from AppController.refreshUI on the main thread)
     @Published var ready = false
@@ -128,8 +129,10 @@ final class AppModel: ObservableObject {
     }
 
     func typeClipboard() { controller?.typeClipboard() }
+    func typeComposerText() { typeText(composerText) }
     func toggleBubble() { controller?.toggleBubble() }
     func openBubble() { controller?.openBubble() }
+    func openMainWindow() { controller?.showMainWindow() }
     func stop() { controller?.stopTyping() }
     func setMode(_ m: TypingProfile.Mode) { controller?.setMode(m) }
     func openAccessibilitySettings() { Permissions.openAccessibilitySettings() }

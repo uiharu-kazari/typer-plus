@@ -9,7 +9,10 @@ import AppKit
 
 struct HomeView: View {
     @EnvironmentObject var model: AppModel
-    @State private var text = ""
+    private var text: String {
+        get { model.composerText }
+        nonmutating set { model.composerText = newValue }
+    }
     @FocusState private var composerFocused: Bool
 
     private var words: Int { countWords(text) }
@@ -21,7 +24,7 @@ struct HomeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            ScreenHeader(greeting, subtitle: "Click a field, then send your text to it.", large: true)
+            ScreenHeader(greeting, large: true)
             HStack(alignment: .top, spacing: Spacing.lg) {
                 leftColumn
                 rightColumn.frame(width: 320)
@@ -48,6 +51,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             textWell.frame(maxHeight: .infinity)
 
+            HStack(spacing: Spacing.sm) {
             Button { primaryAction() } label: {
                 HStack(spacing: Spacing.xs) {
                     if model.isTyping {
@@ -62,9 +66,18 @@ struct HomeView: View {
             .disabled(model.ready && !model.isTyping && trimmedEmpty)
             .animation(Motion.spring, value: model.isTyping)
 
+            Button {
+                text = TextCleanup.removingNewlines(text)
+            } label: {
+                Label("Remove newlines", systemImage: "text.alignleft")
+            }
+            .buttonStyle(SecondaryButtonStyle())
+            .fixedSize()
+            .disabled(text.rangeOfCharacter(from: .newlines) == nil)
+            .help("Join all lines with spaces")
+            }
+
             HStack(spacing: 6) {
-                Image(systemName: "info.circle").icon(.inlineHint)
-                Text("You'll get a moment to click your field.")
                 Spacer()
                 Text("\(pluralize(words, "word")) · \(pluralize(text.count, "character"))")
             }
@@ -80,7 +93,7 @@ struct HomeView: View {
                     .font(Typo.body).foregroundStyle(Theme.textTertiary)
                     .padding(.top, 8).padding(.leading, 5).allowsHitTesting(false)
             }
-            TextEditor(text: $text)
+            TextEditor(text: $model.composerText)
                 .focused($composerFocused)
                 .font(Typo.body).foregroundStyle(Theme.textBody)
                 .tint(Theme.teal)
@@ -103,7 +116,7 @@ struct HomeView: View {
     }
     private var ctaTitle: String {
         if !model.ready { return "Grant Accessibility access" }
-        if model.isTyping && model.paused { return "Stop — paused (secure field)" }
+        if model.isTyping && model.paused { return "Stop — paused (select a target field)" }
         if model.isTyping { return Settings.shared.pasteDelivery ? "Stop" : "Stop typing" }
         return Settings.shared.pasteDelivery ? "Paste it" : "Type it"
     }

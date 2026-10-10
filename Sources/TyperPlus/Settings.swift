@@ -33,6 +33,8 @@ final class Settings {
         static let bubblePointY = "bubblePointY"
         static let bubbleHasCustomPoint = "bubbleHasCustomPoint"
         static let bubbleCollapsed = "bubbleCollapsed"
+        static let bubbleTextBoxOpen = "bubbleTextBoxOpen"
+        static let bubbleTextBoxHeight = "bubbleTextBoxHeight"
     }
 
     private init() {
@@ -59,7 +61,9 @@ final class Settings {
             Key.bubbleHotkeyModifiers: Int(cmdKey | optionKey),
             Key.bubbleVisible: false,
             Key.bubbleHasCustomPoint: false,
-            Key.bubbleCollapsed: false
+            Key.bubbleCollapsed: false,
+            Key.bubbleTextBoxOpen: false,
+            Key.bubbleTextBoxHeight: 0.0
         ])
     }
 
@@ -170,6 +174,18 @@ final class Settings {
     }
 
     /// Whether the bubble is minimized to the bottom-right sliver (only + and Type clipboard).
+    /// Whether the bubble shows its compact, auto-growing text box.
+    var bubbleTextBoxOpen: Bool {
+        get { d.bool(forKey: Key.bubbleTextBoxOpen) }
+        set { d.set(newValue, forKey: Key.bubbleTextBoxOpen) }
+    }
+
+    /// User-dragged height (pt) of the bubble's text box; 0 = auto-fit the content.
+    var bubbleTextBoxHeight: Double {
+        get { max(0, d.double(forKey: Key.bubbleTextBoxHeight)) }
+        set { d.set(newValue, forKey: Key.bubbleTextBoxHeight) }
+    }
+
     var bubbleCollapsed: Bool {
         get { d.bool(forKey: Key.bubbleCollapsed) }
         set { d.set(newValue, forKey: Key.bubbleCollapsed) }

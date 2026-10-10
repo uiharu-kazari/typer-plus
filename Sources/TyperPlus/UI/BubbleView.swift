@@ -4,8 +4,8 @@
 //
 //  A tiny panel that floats above any app so the user never has to switch back to the
 //  main window: pick a mode, then one button types whatever is on the clipboard into the
-//  next field you click. Cleanup + the focus countdown are owned by the engine
-//  (beginTyping). No text box — the source is always the clipboard (quick paste).
+//  next field you click, or type the main dashboard's text. Cleanup + the focus
+//  countdown are owned by the engine (beginTyping).
 //
 //  Built entirely from DesignSystem tokens (Theme / Typo / Spacing / Elev / Motion)
 //  and the house brand mark (TyperMark) so it reads as the same product.
@@ -13,7 +13,7 @@
 //  Architecture: the host (BubbleController) owns the borderless .statusBar-level
 //  non-activating NSPanel and the persisted position; it drives this view via the
 //  shared `AppModel` (so the bubble reflects the same run the menu / main window see)
-//  plus four closures (drag / drag-ended / snap / close) and the current `anchor`.
+//  plus closures for close / minimize / expand / text-box toggle / height changes.
 //
 
 import SwiftUI
@@ -23,18 +23,30 @@ import AppKit
 
 enum BubbleLayout {
     static let width:  CGFloat = 260
-    static let height: CGFloat = 166
+    static let height: CGFloat = 150
     static let radius: CGFloat = 20
     static let inset:  CGFloat = 14
-    static let edgeMargin: CGFloat = 18   // gap from the screen edge when snapped
+    static let edgeMargin: CGFloat = 18   // gap from the screen edge at the default spot
 
     // Minimized "sliver": just + (expand) and a short Type button, flush to the edge.
     static let collapsedWidth:  CGFloat = 196
     static let collapsedHeight: CGFloat = 34
     static let collapsedRadius: CGFloat = 11
+
+    // Optional inline text box: auto-fits its content up to `textBoxAutoMax`; the user can
+    // drag its bottom edge to any height in [textBoxMinHeight, textBoxMaxHeight] (then it scrolls).
+    static let textBoxMinHeight: CGFloat = 40
+    static let textBoxAutoMax: CGFloat = 120
+    static let textBoxMaxHeight: CGFloat = 480
+    static let textBoxVPad: CGFloat = 16      // inner padding around the editor
+    /// Total panel height for a text box of `boxHeight` (nil = text box hidden).
+    static func height(box boxHeight: CGFloat?) -> CGFloat {
+        guard let h = boxHeight else { return height }
+        return height + h + 8
+    }
 }
 
-// MARK: - Snap anchor (9-way grid, persisted)
+// MARK: - Default position
 
 /// The bubble's DEFAULT resting spot — bottom-right of the active screen. Free-dragging
 /// stores a custom origin in `Settings.bubblePoint`; this is the fallback when none is set.
@@ -90,8 +102,21 @@ struct BubbleView: View {
     var onExpand: () -> Void = {}
     /// Whether to render the minimized sliver (only + and Type clipboard).
     var collapsed: Bool = false
+    /// Whether the inline text box is shown, and the toggle for it.
+    var textBoxOpen: Bool = false
+    var onToggleTextBox: () -> Void = {}
+    /// Reports the desired total panel height whenever the text box content grows/shrinks.
+    var onHeightChange: (CGFloat) -> Void = { _ in }
 
     @State private var ctaHover = false
+    @State private var brandHover = false
+    @State private var textContentHeight: CGFloat = 0
+    /// User-dragged box height; 0 = auto-fit. Persisted so it survives rehosts/relaunch.
+    @State private var manualHeight: CGFloat = CGFloat(Settings.shared.bubbleTextBoxHeight)
+    @FocusState private var textBoxFocused: Bool
+    @State private var dragStartHeight: CGFloat = 0
+
+    private static let textFont = AppFont.inter(.regular, 12.5)
 
     /// Phase resolved purely from pushed engine state — no local countdown anymore;
     /// AppController.beginTyping owns the cleanup + the canonical countdown HUD.
@@ -117,17 +142,100 @@ struct BubbleView: View {
     private var fullBubble: some View {
         VStack(spacing: Spacing.sm) {
             header
+            if textBoxOpen { textBox }
             modePicker
-            primaryCTA
+            HStack(spacing: 8) {
+                primaryCTA
+                Button { model.typeComposerText() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("Text box").font(AppFont.inter(.semibold, 12))
+                    }
+                }
+                .buttonStyle(BubblePrimaryButtonStyle(role: .secondary))
+                .disabled(model.isTyping || model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help("Type the text from the main dashboard into your target field")
+            }
         }
         .padding(BubbleLayout.inset)
-        .frame(width: BubbleLayout.width, height: BubbleLayout.height)
+        .frame(width: BubbleLayout.width,
+               height: BubbleLayout.height(box: textBoxOpen ? boxHeight : nil))
+        .onChange(of: boxHeight) { _, _ in reportHeight() }
         .background(surface(BubbleLayout.radius))
         .clipShape(RoundedRectangle(cornerRadius: BubbleLayout.radius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: BubbleLayout.radius, style: .continuous)
                 .strokeBorder(Theme.beigeStroke, lineWidth: 1)
         )
+    }
+
+    // MARK: Inline text box — compact, grows with its content (up to a cap), fully editable.
+    //
+    // Bound to the same `composerText` as the Home composer, so what you see here is what
+    // "Text box" types. A hidden Text with identical font/width measures the content so the
+    // editor (and the panel, via onHeightChange) track it as you type, paste or delete.
+
+    private var boxHeight: CGFloat {
+        if manualHeight > 0 {
+            return min(max(manualHeight, BubbleLayout.textBoxMinHeight), BubbleLayout.textBoxMaxHeight)
+        }
+        return min(max(textContentHeight + BubbleLayout.textBoxVPad, BubbleLayout.textBoxMinHeight),
+                   BubbleLayout.textBoxAutoMax)
+    }
+
+    private var textBox: some View {
+        let inner = BubbleLayout.width - BubbleLayout.inset * 2 - 16
+        return ZStack(alignment: .topLeading) {
+            if model.composerText.isEmpty {
+                Text("Type or paste text here…")
+                    .font(Self.textFont).foregroundStyle(Theme.textTertiary)
+                    .padding(.top, 0).padding(.leading, 5).allowsHitTesting(false)
+            }
+            TextEditor(text: $model.composerText)
+                .focused($textBoxFocused)
+                .font(Self.textFont).foregroundStyle(Theme.textBody)
+                .tint(Theme.teal)
+                .scrollContentBackground(.hidden)
+                .padding(.top, -8)
+                .padding(.bottom, 6)
+                .disabled(model.isTyping)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 8)
+        .frame(height: boxHeight)
+        .background(RoundedRectangle(cornerRadius: Spacing.fieldRadius, style: .continuous).fill(Theme.creamSunken))
+        .overlay(alignment: .bottom) {
+            // Drag the bottom edge to resize (panel follows); double-click to go back to auto-fit.
+            ResizeGrip(
+                onBegin: { dragStartHeight = boxHeight },
+                onDrag: { dy in
+                    manualHeight = min(max(dragStartHeight + dy, BubbleLayout.textBoxMinHeight),
+                                       BubbleLayout.textBoxMaxHeight)
+                },
+                onEnd: { Settings.shared.bubbleTextBoxHeight = Double(manualHeight) },
+                onReset: { manualHeight = 0; Settings.shared.bubbleTextBoxHeight = 0 })
+            .frame(height: 12)
+        }
+        .overlay(RoundedRectangle(cornerRadius: Spacing.fieldRadius, style: .continuous)
+            .strokeBorder(textBoxFocused ? Theme.teal.opacity(0.55) : Theme.strokeWell,
+                          lineWidth: textBoxFocused ? 1.5 : 1))
+        .background(
+            Text(model.composerText.isEmpty ? " " : model.composerText + "\u{200B}")
+                .font(Self.textFont)
+                .padding(.horizontal, 5)
+                .frame(width: inner, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: TextHeightKey.self, value: g.size.height)
+                })
+                .hidden()
+        )
+        .onPreferenceChange(TextHeightKey.self) { textContentHeight = $0 }
+        .onAppear { reportHeight() }
+    }
+
+    private func reportHeight() {
+        onHeightChange(BubbleLayout.height(box: textBoxOpen ? boxHeight : nil))
     }
 
     // MARK: Collapsed sliver — only + (expand) and Type clipboard; everything else off
@@ -213,20 +321,35 @@ struct BubbleView: View {
     // isMovableByWindowBackground you can grab the bubble almost anywhere and move it.
     private var header: some View {
         HStack(spacing: Spacing.xs) {
-            TyperMark()
-                .frame(width: 18, height: 18)
-                .accessibilityHidden(true)
-                .allowsHitTesting(false)
-            Text("Typer+")
-                .font(AppFont.inter(.bold, 15.5)).tracking(-0.3)
-                .foregroundStyle(Theme.textPrimary)
-                .fixedSize()
-                .allowsHitTesting(false)
+            Button { model.openMainWindow() } label: {
+                HStack(spacing: Spacing.xs) {
+                    TyperMark()
+                        .frame(width: 18, height: 18)
+                        .accessibilityHidden(true)
+                    Text("Typer+")
+                        .font(AppFont.inter(.bold, 15.5)).tracking(-0.3)
+                        .foregroundStyle(Theme.textPrimary)
+                        .fixedSize()
+                }
+                .padding(.horizontal, 6).frame(height: 24)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(brandHover ? Theme.hoverFill : .clear))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, -6)   // keep the logo's visual position; the hover chip extends past it
+            .onHover { h in
+                brandHover = h
+                if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+            .animation(Motion.snappy, value: brandHover)
+            .help("Open main window")
 
-            DragHandle()
-                .frame(maxWidth: .infinity)
-                .allowsHitTesting(false)
+            Spacer(minLength: 0)
 
+            HeaderIconButton(system: "text.alignleft",
+                             help: textBoxOpen ? "Collapse text box" : "Expand text box",
+                             active: textBoxOpen) { onToggleTextBox() }
             HeaderIconButton(system: "minus", help: "Minimize to corner") { onMinimize() }
             HeaderIconButton(system: "xmark", help: "Hide bubble (⌘⌥B)") { onClose() }
         }
@@ -272,13 +395,13 @@ struct BubbleView: View {
 
     private var primaryCTA: some View {
         Button { primaryAction() } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 if ctaCancel {
                     Image(systemName: "xmark").font(.system(size: 15, weight: .bold))
                     Text("Cancel")
                 } else {
                     ctaLeading
-                    Text(ctaTitle).lineLimit(1)
+                    Text(ctaTitle).font(AppFont.inter(.semibold, 12)).lineLimit(1)
                 }
             }
             .contentTransition(.opacity)
@@ -296,13 +419,13 @@ struct BubbleView: View {
         case .typing:      TypingDots()
         case .paused:      Image(systemName: "pause.fill").font(.system(size: 12, weight: .bold))
         case .needsAccess: Image(systemName: "lock.fill").font(.system(size: 12, weight: .semibold))
-        case .idle:        Image(systemName: "doc.on.clipboard").font(.system(size: 12, weight: .semibold))
+        case .idle:        Image(systemName: "doc.on.clipboard").font(.system(size: 12, weight: .medium))
         }
     }
 
     private var ctaTitle: String {
         switch resolvedPhase {
-        case .idle:        return "Type clipboard"
+        case .idle:        return "Clipboard"
         case .typing:      return "Typing…"
         case .paused:      return "Paused"
         case .needsAccess: return "Grant access"
@@ -336,6 +459,55 @@ struct BubbleView: View {
 
 }
 
+/// Bottom-edge grab strip for the text box. An AppKit view so the panel's
+/// isMovableByWindowBackground doesn't turn the drag into a window move; reports the
+/// vertical delta (down = positive) from screen coordinates, which stay stable while the
+/// panel resizes under the cursor.
+private struct ResizeGrip: NSViewRepresentable {
+    var onBegin: () -> Void
+    var onDrag: (CGFloat) -> Void
+    var onEnd: () -> Void
+    var onReset: () -> Void
+
+    func makeNSView(context: Context) -> GripView { GripView() }
+    func updateNSView(_ v: GripView, context: Context) {
+        v.onBegin = onBegin; v.onDrag = onDrag; v.onEnd = onEnd; v.onReset = onReset
+    }
+
+    final class GripView: NSView {
+        var onBegin: () -> Void = {}
+        var onDrag: (CGFloat) -> Void = { _ in }
+        var onEnd: () -> Void = {}
+        var onReset: () -> Void = {}
+        private var startY: CGFloat = 0
+
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeUpDown) }
+
+        override func draw(_ dirtyRect: NSRect) {
+            let pill = NSRect(x: bounds.midX - 14, y: bounds.minY + 3, width: 28, height: 3)
+            NSColor.tertiaryLabelColor.withAlphaComponent(0.7).setFill()
+            NSBezierPath(roundedRect: pill, xRadius: 1.5, yRadius: 1.5).fill()
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 { onReset(); return }
+            startY = NSEvent.mouseLocation.y
+            onBegin()
+        }
+        override func mouseDragged(with event: NSEvent) {
+            onDrag(startY - NSEvent.mouseLocation.y)
+        }
+        override func mouseUp(with event: NSEvent) { onEnd() }
+    }
+}
+
+private struct TextHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 // MARK: - Native window drag (AppKit performDrag — smooth, no coordinate-space feedback)
 
 /// A transparent NSView that hands a mouse-down straight to `window.performDrag(with:)`.
@@ -355,20 +527,6 @@ struct WindowDragArea: NSViewRepresentable {
             window?.performDrag(with: event)
             onEnded()
         }
-    }
-}
-
-// MARK: - Drag handle (centered grip dots)
-
-private struct DragHandle: View {
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(0..<3, id: \.self) { _ in
-                Circle().fill(Theme.textTertiary.opacity(0.55)).frame(width: 3, height: 3)
-            }
-        }
-        .frame(height: 22)
-        .accessibilityLabel("Drag to move")
     }
 }
 
@@ -399,25 +557,26 @@ private struct HeaderIconButton: View {
 
 // MARK: - Primary CTA style (role-tinted: black / teal-busy / amber-warning)
 
-enum BubbleCTARole { case primary, busy, warning, danger }
+enum BubbleCTARole { case primary, secondary, busy, warning, danger }
 
 struct BubblePrimaryButtonStyle: ButtonStyle {
     var role: BubbleCTARole = .primary
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Typo.buttonLabel)
-            .foregroundStyle(foreground)
+            .foregroundStyle(isEnabled ? foreground : Theme.textTertiary)
             .frame(maxWidth: .infinity)
             .frame(height: 34)
-            .padding(.horizontal, Spacing.sm)
+            .padding(.horizontal, 8)
             .background(
                 RoundedRectangle(cornerRadius: Spacing.navRadius, style: .continuous)
-                    .fill(background(pressed: configuration.isPressed))
+                    .fill(isEnabled ? background(pressed: configuration.isPressed) : Theme.creamSunken)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Spacing.navRadius, style: .continuous)
-                    .strokeBorder(strokeColor, lineWidth: role == .warning ? 1 : 0)
+                .strokeBorder(strokeColor, lineWidth: role == .warning || role == .secondary ? 1 : 0)
             )
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .animation(Motion.snappy, value: configuration.isPressed)
@@ -428,11 +587,12 @@ struct BubblePrimaryButtonStyle: ButtonStyle {
         switch role { case .warning: Theme.warning; default: .white }
     }
     private var strokeColor: Color {
-        role == .warning ? Theme.warning.opacity(0.5) : .clear
+        role == .warning ? Theme.warning.opacity(0.5) : (role == .secondary ? Theme.teal.opacity(0.25) : .clear)
     }
     private func background(pressed: Bool) -> Color {
         switch role {
         case .primary: pressed ? Theme.tealPressed : Theme.teal   // green primary (matches the app)
+        case .secondary: pressed ? Theme.tealPressed : Theme.teal
         case .busy:    pressed ? Theme.tealPressed : Theme.teal
         case .warning: pressed ? Theme.warning.opacity(0.14) : Theme.warning.opacity(0.10)
         case .danger:  pressed ? Theme.danger.opacity(0.85) : Theme.danger

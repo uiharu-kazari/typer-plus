@@ -21,8 +21,7 @@ private final class BubblePanel: NSPanel {
 /// the shared `AppModel`, so the bubble's mode / typing state stay in lock-step with the
 /// menu + main window). Created and retained by AppController.
 ///
-/// Show/hide is idempotent; position — a 9-way `BubbleAnchor` snap OR a custom dragged
-/// point — is persisted in Settings and restored on show.
+/// Show/hide is idempotent; position (a free-dragged point, default bottom-right) is persisted in Settings and restored on show.
 ///
 /// SAFETY: the paste field can hold key focus while you compose, but the moment you type,
 /// `BubbleView` → `AppModel.typeText` → `AppController.beginTyping` runs, which calls
@@ -36,6 +35,10 @@ final class BubbleController: NSObject, NSWindowDelegate {
 
     /// Minimized to the small sliver (only + and Type clipboard).
     private var collapsed: Bool = Settings.shared.bubbleCollapsed
+
+    /// Inline text box shown (compact, auto-growing); `panelHeight` tracks its content.
+    private var textBoxOpen: Bool = Settings.shared.bubbleTextBoxOpen
+    private var panelHeight: CGFloat = BubbleLayout.height
 
     private static let size = NSSize(width: BubbleLayout.width, height: BubbleLayout.height)
     private static let collapsedSize = NSSize(width: BubbleLayout.collapsedWidth, height: BubbleLayout.collapsedHeight)
@@ -79,6 +82,21 @@ final class BubbleController: NSObject, NSWindowDelegate {
         if let panel = panel { applyLayout(to: panel) }
     }
 
+    func setTextBoxOpen(_ open: Bool) {
+        textBoxOpen = open
+        Settings.shared.bubbleTextBoxOpen = open
+        if !open { panelHeight = BubbleLayout.height }
+        rehostView()
+        if let panel = panel { applyLayout(to: panel, keepingTop: true) }
+    }
+
+    /// The text box grew/shrank: resize the panel, keeping its top edge fixed.
+    private func contentHeightChanged(_ h: CGFloat) {
+        guard textBoxOpen, !collapsed, abs(h - panelHeight) > 0.5 else { return }
+        panelHeight = h
+        if let panel = panel, panel.isVisible { applyLayout(to: panel, keepingTop: true) }
+    }
+
     // MARK: - Panel construction
 
     private func ensurePanel() -> BubblePanel {
@@ -111,7 +129,16 @@ final class BubbleController: NSObject, NSWindowDelegate {
             onClose:    { [weak self] in self?.hide() },
             onMinimize: { [weak self] in self?.setCollapsed(true) },
             onExpand:   { [weak self] in self?.setCollapsed(false) },
-            collapsed:  collapsed)
+            collapsed:  collapsed,
+            textBoxOpen: textBoxOpen,
+            onToggleTextBox: { [weak self] in
+                guard let self = self else { return }
+                self.setTextBoxOpen(!self.textBoxOpen)
+            },
+            onHeightChange: { [weak self] h in
+                // Defer: this fires during a SwiftUI layout pass.
+                DispatchQueue.main.async { self?.contentHeightChanged(h) }
+            })
             .environmentObject(model)
         // FirstMouseHostingView: the bubble is the user's primary surface and floats above
         // other apps without taking focus, so a click on its Type/Cancel button would
@@ -144,10 +171,19 @@ final class BubbleController: NSObject, NSWindowDelegate {
 
     /// Size the panel for the current state and place it at the saved free point, clamped
     /// fully on-screen (so a stale/edge point can never make "Open pop-out" appear to fail).
-    private func applyLayout(to panel: NSPanel) {
-        let size = collapsed ? Self.collapsedSize : Self.size
+    private func applyLayout(to panel: NSPanel, keepingTop: Bool = false) {
+        let size = collapsed ? Self.collapsedSize
+                 : NSSize(width: BubbleLayout.width, height: textBoxOpen ? panelHeight : BubbleLayout.height)
         moveProgrammatically {
-            panel.setFrame(NSRect(origin: visibleOrigin(panel, for: size), size: size), display: true)
+            var origin = visibleOrigin(panel, for: size)
+            if keepingTop, panel.isVisible {
+                // Grow/shrink downward from the current top edge, then clamp on-screen.
+                origin = NSPoint(x: panel.frame.origin.x, y: panel.frame.maxY - size.height)
+                if let vf = (NSScreen.screens.first { $0.frame.intersects(panel.frame) } ?? NSScreen.main)?.visibleFrame {
+                    origin.y = min(max(origin.y, vf.minY + 6), vf.maxY - size.height - 6)
+                }
+            }
+            panel.setFrame(NSRect(origin: origin, size: size), display: true)
         }
     }
 
