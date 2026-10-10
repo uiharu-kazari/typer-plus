@@ -124,6 +124,51 @@ struct ModeGlyph: View {
     }
 }
 
+// MARK: - "Remove newlines" glyph: a `\n` key-cap with a "remove" badge
+//
+// A rounded key-cap holding the newline escape `\n`, plus the usual "item − minus-badge"
+// mark in the accent colour at its corner. The text stays fully legible (a slash through it
+// turned to mush), and it reads as an icon rather than loose text down to ~16pt.
+
+struct RemoveNewlinesGlyph: View {
+    var ink: Color = Theme.textPrimary
+    var accent: Color = Theme.teal
+
+    var body: some View {
+        GeometryReader { g in
+            let side = min(g.size.width, g.size.height)
+            let line = max(1.2, side * 0.085)
+            let cap = side * 0.88                    // key-cap leaves room for the badge
+            let badge = side * 0.46
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: cap * 0.26, style: .continuous)
+                    .strokeBorder(ink, lineWidth: line)
+                    .frame(width: cap, height: cap)
+                    .overlay(
+                        Text("\\n")
+                            .font(.system(size: cap * 0.48, weight: .bold, design: .monospaced))
+                            .foregroundStyle(ink)
+                            .fixedSize()
+                    )
+                Canvas { ctx, size in
+                    let c = CGPoint(x: side - badge / 2, y: side - badge / 2)
+                    let disc = CGRect(x: c.x - badge / 2, y: c.y - badge / 2, width: badge, height: badge)
+                    ctx.fill(Path(ellipseIn: disc.insetBy(dx: -line * 0.9, dy: -line * 0.9)), with: .color(Theme.panel))
+                    ctx.fill(Path(ellipseIn: disc), with: .color(accent))
+                    var minus = Path()
+                    minus.move(to: CGPoint(x: c.x - badge * 0.22, y: c.y))
+                    minus.addLine(to: CGPoint(x: c.x + badge * 0.22, y: c.y))
+                    ctx.stroke(minus, with: .color(.white), style: StrokeStyle(lineWidth: max(1.3, badge * 0.17), lineCap: .round))
+                }
+                .frame(width: side, height: side)
+            }
+            .frame(width: side, height: side, alignment: .topLeading)
+            .frame(width: g.size.width, height: g.size.height)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Empty-state illustrations
 
 struct EmptyHistoryArt: View {

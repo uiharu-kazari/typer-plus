@@ -66,15 +66,26 @@ struct HomeView: View {
             .disabled(model.ready && !model.isTyping && trimmedEmpty)
             .animation(Motion.spring, value: model.isTyping)
 
+            // Same pairing as the pop-out: the main CTA beside a quick "Clipboard" CTA.
+            Button { model.typeClipboard() } label: {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "doc.on.clipboard").icon(.affordance)
+                    Text("Clipboard")
+                }
+            }
+            .buttonStyle(PrimaryButtonStyle(fullWidth: true))
+            .disabled(!model.ready || model.isTyping)
+            .help("Type whatever is on your clipboard (⌘⌥T)")
+
             Button {
                 text = TextCleanup.removingNewlines(text)
             } label: {
-                Label("Remove newlines", systemImage: "text.alignleft")
+                RemoveNewlinesGlyph().frame(width: 18, height: 18)
             }
             .buttonStyle(SecondaryButtonStyle())
             .fixedSize()
             .disabled(text.rangeOfCharacter(from: .newlines) == nil)
-            .help("Join all lines with spaces")
+            .help("Remove newlines (join all lines with spaces)")
             }
 
             HStack(spacing: 6) {
@@ -156,6 +167,7 @@ struct HomeView: View {
 
     private var rightColumn: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
+            actionsCard
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 SectionHeader("Mode")
                 ForEach(TypingProfile.Mode.allCases, id: \.self) { m in
@@ -163,7 +175,6 @@ struct HomeView: View {
                 }
             }
             .animation(Motion.snappy, value: model.mode)   // smooth selection transition
-            actionsCard
             statStrip
             Spacer(minLength: 0)
         }
@@ -172,16 +183,6 @@ struct HomeView: View {
 
     private var actionsCard: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Button { model.typeClipboard() } label: {
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "doc.on.clipboard").icon(.affordance)
-                    Text("Type clipboard"); Spacer(minLength: 0)
-                    Text("⌘⌥T").font(AppFont.inter(.medium, 12)).opacity(0.6)
-                }
-            }
-            .buttonStyle(SecondaryButtonStyle(fullWidth: true))
-            .disabled(!model.ready || model.isTyping)
-
             Button { model.openBubble() } label: {
                 HStack(spacing: Spacing.xs) {
                     Image(systemName: "pip.enter").icon(.affordance)

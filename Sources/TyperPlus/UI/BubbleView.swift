@@ -35,8 +35,9 @@ enum BubbleLayout {
 
     // Optional inline text box: auto-fits its content up to `textBoxAutoMax`; the user can
     // drag its bottom edge to any height in [textBoxMinHeight, textBoxMaxHeight] (then it scrolls).
-    static let textBoxMinHeight: CGFloat = 40
-    static let textBoxAutoMax: CGFloat = 120
+    static let textBoxToolbar: CGFloat = 28   // action row at the bottom of the box
+    static let textBoxMinHeight: CGFloat = 68  // toolbar + ~2 lines
+    static let textBoxAutoMax: CGFloat = 148
     static let textBoxMaxHeight: CGFloat = 480
     static let textBoxVPad: CGFloat = 16      // inner padding around the editor
     /// Total panel height for a text box of `boxHeight` (nil = text box hidden).
@@ -180,45 +181,54 @@ struct BubbleView: View {
         if manualHeight > 0 {
             return min(max(manualHeight, BubbleLayout.textBoxMinHeight), BubbleLayout.textBoxMaxHeight)
         }
-        return min(max(textContentHeight + BubbleLayout.textBoxVPad, BubbleLayout.textBoxMinHeight),
+        return min(max(textContentHeight + BubbleLayout.textBoxVPad + BubbleLayout.textBoxToolbar,
+                       BubbleLayout.textBoxMinHeight),
                    BubbleLayout.textBoxAutoMax)
     }
 
     private var textBox: some View {
         let hasText = !model.composerText.isEmpty
-        let inner = BubbleLayout.width - BubbleLayout.inset * 2 - 16 - 54
-        return ZStack(alignment: .topLeading) {
-            if model.composerText.isEmpty {
-                Text("Type or paste text here…")
-                    .font(Self.textFont).foregroundStyle(Theme.textTertiary)
-                    .padding(.top, 0).padding(.leading, 5).allowsHitTesting(false)
+        let inner = BubbleLayout.width - BubbleLayout.inset * 2 - 16
+        return VStack(spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                if !hasText {
+                    Text("Type or paste text…")
+                        .font(Self.textFont).foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                        .padding(.leading, 5)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $model.composerText)
+                    .focused($textBoxFocused)
+                    .font(Self.textFont).foregroundStyle(Theme.textBody)
+                    .tint(Theme.teal)
+                    .scrollContentBackground(.hidden)
+                    .padding(.top, -8)
+                    .background(OverlayScroller())
+                    .disabled(model.isTyping)
+                    .allowsHitTesting(!model.isTyping)   // can't click in while a run is typing
             }
-            TextEditor(text: $model.composerText)
-                .focused($textBoxFocused)
-                .font(Self.textFont).foregroundStyle(Theme.textBody)
-                .tint(Theme.teal)
-                .scrollContentBackground(.hidden)
-                .padding(.top, -8)
-                .padding(.bottom, 6)
-                .padding(.trailing, 54)
-                .background(OverlayScroller())
-                .disabled(model.isTyping)
-                .allowsHitTesting(!model.isTyping)   // can't click in while a run is typing
-        }
-        .padding(.horizontal, 8).padding(.vertical, 8)
-        .frame(height: boxHeight)
-        .background(RoundedRectangle(cornerRadius: Spacing.fieldRadius, style: .continuous).fill(Theme.creamSunken))
-        .overlay(alignment: .topTrailing) {
-            // Always present (greyed out when empty/typing) so the layout never shifts.
-            HStack(spacing: 2) {
+            .padding(.horizontal, 8).padding(.top, 8)
+            .frame(maxHeight: .infinity)
+
+            // Action row — always present (greyed out when unavailable) so nothing shifts.
+            HStack(spacing: 4) {
+                Spacer(minLength: 0)
+                BoxIconButton(custom: AnyView(RemoveNewlinesGlyph()), help: "Remove newlines (join lines with spaces)") {
+                    model.composerText = TextCleanup.removingNewlines(model.composerText)
+                }
+                .disabled(model.isTyping || model.composerText.rangeOfCharacter(from: .newlines) == nil)
                 BoxIconButton(system: copied ? "checkmark" : "doc.on.doc",
                               help: "Copy text", tint: copied ? Theme.teal : nil) { copyText() }
                     .disabled(!hasText)
                 BoxIconButton(system: "xmark.circle.fill", help: "Clear text") { clearText() }
                     .disabled(!hasText || model.isTyping)
             }
-            .padding(.top, 3).padding(.trailing, 3)
+            .padding(.horizontal, 4)
+            .frame(height: BubbleLayout.textBoxToolbar)
         }
+        .frame(height: boxHeight)
+        .background(RoundedRectangle(cornerRadius: Spacing.fieldRadius, style: .continuous).fill(Theme.creamSunken))
         .overlay(alignment: .bottom) {
             // Drag the bottom edge to resize (panel follows); double-click to go back to auto-fit.
             ResizeGrip(
@@ -229,7 +239,7 @@ struct BubbleView: View {
                 },
                 onEnd: { Settings.shared.bubbleTextBoxHeight = Double(manualHeight) },
                 onReset: { manualHeight = 0; Settings.shared.bubbleTextBoxHeight = 0 })
-            .frame(height: 12)
+            .frame(width: 72, height: 12)
         }
         .overlay(RoundedRectangle(cornerRadius: Spacing.fieldRadius, style: .continuous)
             .strokeBorder(textBoxFocused ? Theme.teal.opacity(0.55) : Theme.strokeWell,
@@ -597,7 +607,9 @@ private struct HeaderIconButton: View {
 // MARK: - Small icon button inside the text box (copy / clear)
 
 private struct BoxIconButton: View {
-    let system: String
+    var system: String? = nil
+    /// Custom-drawn glyph instead of an SF Symbol.
+    var custom: AnyView? = nil
     var help: String = ""
     var tint: Color? = nil
     let action: () -> Void
@@ -605,10 +617,12 @@ private struct BoxIconButton: View {
     @Environment(\.isEnabled) private var isEnabled
     var body: some View {
         Button(action: action) {
-            Image(systemName: system)
-                .font(.system(size: 12, weight: .semibold))
+            Group {
+                if let custom { custom.frame(width: 18, height: 18) }
+                else { Image(systemName: system ?? "questionmark").font(.system(size: 12, weight: .semibold)) }
+            }
                 .foregroundStyle(tint ?? (hovering && isEnabled ? Theme.textPrimary : Theme.iconGray))
-                .frame(width: 24, height: 24)
+                .frame(width: 26, height: 26)
                 .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(hovering && isEnabled ? Theme.hoverFill : .clear))
                 .contentShape(Rectangle())
