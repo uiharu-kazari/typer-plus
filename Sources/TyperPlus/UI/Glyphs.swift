@@ -61,6 +61,69 @@ struct TyperMark: View {
     }
 }
 
+// MARK: - Mode glyph: one speed gauge for every mode (needle position = pace)
+//
+// A 270° dial, open at the bottom: a faint track, a tinted arc filled up to the needle,
+// and a short needle on a hub. Same drawing everywhere (dashboard cards, bubble header and
+// menu), so the four modes read as one family.
+
+extension TypingProfile.Mode {
+    /// 0…1 position of the needle along the dial.
+    var gaugeLevel: Double {
+        switch self {
+        case .careful:    return 0.22
+        case .maxStealth: return 0.45   // a natural, mid-dial rhythm
+        case .ultraFast:  return 0.72
+        case .maxSpeed:   return 1.0
+        }
+    }
+}
+
+struct ModeGlyph: View {
+    let mode: TypingProfile.Mode
+    var tint: Color? = nil
+    var ink: Color = Theme.textPrimary
+
+    var body: some View {
+        let color = tint ?? Theme.modeTint(mode)
+        Canvas { ctx, size in
+            let r = CGRect(origin: .zero, size: size)
+            let side = min(r.width, r.height)
+            let stroke = side * 0.12
+            let radius = side / 2 - stroke / 2 - side * 0.04
+            let c = CGPoint(x: r.midX, y: r.midY + side * 0.03)
+            let start = 135.0, sweep = 270.0
+            let style = StrokeStyle(lineWidth: stroke, lineCap: .round)
+
+            func arc(_ fraction: Double) -> Path {
+                var p = Path()
+                p.addArc(center: c, radius: radius, startAngle: .degrees(start),
+                         endAngle: .degrees(start + sweep * fraction), clockwise: false)
+                return p
+            }
+            ctx.stroke(arc(1), with: .color(ink.opacity(0.18)), style: style)
+            ctx.stroke(arc(mode.gaugeLevel), with: .color(color), style: style)
+
+            let a = Angle.degrees(start + sweep * mode.gaugeLevel).radians
+            var needle = Path()
+            needle.move(to: c)
+            needle.addLine(to: CGPoint(x: c.x + cos(a) * radius * 0.66, y: c.y + sin(a) * radius * 0.66))
+            ctx.stroke(needle, with: .color(ink), style: StrokeStyle(lineWidth: stroke * 0.85, lineCap: .round))
+            let hub = stroke * 0.55
+            ctx.fill(Path(ellipseIn: CGRect(x: c.x - hub, y: c.y - hub, width: hub * 2, height: hub * 2)),
+                     with: .color(ink))
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// Rasterized glyph for AppKit-backed menu items (which can't host a SwiftUI Canvas).
+    @MainActor static func image(_ mode: TypingProfile.Mode, size: CGFloat = 16) -> NSImage {
+        let renderer = ImageRenderer(content: ModeGlyph(mode: mode).frame(width: size, height: size))
+        renderer.scale = 2
+        return renderer.nsImage ?? NSImage()
+    }
+}
+
 // MARK: - Empty-state illustrations
 
 struct EmptyHistoryArt: View {

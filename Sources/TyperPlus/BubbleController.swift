@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 
 // NOTE: the default-position helper (`BubbleAnchor`), `BubbleLayout`, and the SwiftUI
 // `BubbleView` all live in UI/BubbleView.swift. This file owns only the host NSPanel +
@@ -11,7 +12,10 @@ import SwiftUI
 /// typing + ⌘V) yet does NOT activate the app or pull it off other Spaces. Mirrors the
 /// CountdownHUD window config, but interactive and draggable.
 private final class BubblePanel: NSPanel {
-    override var canBecomeKey: Bool { true }
+    /// False while a run is typing: a key panel receives the injected keystrokes even though
+    /// it is non-activating, so the bubble must never hold key focus during a run.
+    var allowsKey = true
+    override var canBecomeKey: Bool { allowsKey }
     override var canBecomeMain: Bool { false }
 }
 
@@ -32,6 +36,7 @@ final class BubbleController: NSObject, NSWindowDelegate {
 
     private let model: AppModel
     private var panel: BubblePanel?
+    private var typingSub: AnyCancellable?
 
     /// Minimized to the small sliver (only + and Type clipboard).
     private var collapsed: Bool = Settings.shared.bubbleCollapsed
@@ -46,6 +51,16 @@ final class BubbleController: NSObject, NSWindowDelegate {
     init(model: AppModel) {
         self.model = model
         super.init()
+        // While typing: drop key focus and refuse it, so a click can't put the caret in the
+        // bubble's text box and swallow the injected keys. Restored when the run ends.
+        typingSub = model.$isTyping.removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self] typing in
+            guard let panel = self?.panel else { return }
+            panel.allowsKey = !typing
+            if typing {
+                panel.makeFirstResponder(nil)
+                if panel.isKeyWindow { panel.resignKey() }
+            }
+        }
     }
 
     var isVisible: Bool { panel?.isVisible ?? false }
@@ -65,7 +80,7 @@ final class BubbleController: NSObject, NSWindowDelegate {
         rehostView()
         applyLayout(to: panel)          // size + clamp on-screen
         panel.orderFrontRegardless()    // show without activating / leaving the current Space
-        panel.makeKey()
+        if panel.allowsKey { panel.makeKey() }
         Settings.shared.bubbleVisible = true
     }
 
@@ -115,6 +130,7 @@ final class BubbleController: NSObject, NSWindowDelegate {
         panel.isMovableByWindowBackground = true      // drag from anywhere on the bubble body
         panel.hidesOnDeactivate = false
         panel.delegate = self                          // windowDidMove → persist the new spot
+        panel.allowsKey = !model.isTyping
 
         self.panel = panel
         rehostView()

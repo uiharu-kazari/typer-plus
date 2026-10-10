@@ -113,8 +113,6 @@ struct NavCluster: View {
                 .buttonStyle(.plain).help("Typer+ needs Accessibility access")
             }
 
-            TopBarButton(symbol: "pip.enter", help: "Open pop-out (⌘⌥B)") { model.openBubble() }
-
             Rectangle().fill(Theme.divider).frame(width: 1, height: 18)
 
             ForEach(Screen.secondary) { s in

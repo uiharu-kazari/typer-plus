@@ -23,7 +23,7 @@ import AppKit
 
 enum BubbleLayout {
     static let width:  CGFloat = 260
-    static let height: CGFloat = 150
+    static let height: CGFloat = 100
     static let radius: CGFloat = 20
     static let inset:  CGFloat = 14
     static let edgeMargin: CGFloat = 18   // gap from the screen edge at the default spot
@@ -110,6 +110,8 @@ struct BubbleView: View {
 
     @State private var ctaHover = false
     @State private var brandHover = false
+    @State private var modeHover = false
+    @State private var copied = false
     @State private var textContentHeight: CGFloat = 0
     /// User-dragged box height; 0 = auto-fit. Persisted so it survives rehosts/relaunch.
     @State private var manualHeight: CGFloat = CGFloat(Settings.shared.bubbleTextBoxHeight)
@@ -143,7 +145,6 @@ struct BubbleView: View {
         VStack(spacing: Spacing.sm) {
             header
             if textBoxOpen { textBox }
-            modePicker
             HStack(spacing: 8) {
                 primaryCTA
                 Button { model.typeComposerText() } label: {
@@ -185,7 +186,8 @@ struct BubbleView: View {
     }
 
     private var textBox: some View {
-        let inner = BubbleLayout.width - BubbleLayout.inset * 2 - 16
+        let hasText = !model.composerText.isEmpty
+        let inner = BubbleLayout.width - BubbleLayout.inset * 2 - 16 - 54
         return ZStack(alignment: .topLeading) {
             if model.composerText.isEmpty {
                 Text("Type or paste text here…")
@@ -199,11 +201,25 @@ struct BubbleView: View {
                 .scrollContentBackground(.hidden)
                 .padding(.top, -8)
                 .padding(.bottom, 6)
+                .padding(.trailing, 54)
+                .background(OverlayScroller())
                 .disabled(model.isTyping)
+                .allowsHitTesting(!model.isTyping)   // can't click in while a run is typing
         }
         .padding(.horizontal, 8).padding(.vertical, 8)
         .frame(height: boxHeight)
         .background(RoundedRectangle(cornerRadius: Spacing.fieldRadius, style: .continuous).fill(Theme.creamSunken))
+        .overlay(alignment: .topTrailing) {
+            // Always present (greyed out when empty/typing) so the layout never shifts.
+            HStack(spacing: 2) {
+                BoxIconButton(system: copied ? "checkmark" : "doc.on.doc",
+                              help: "Copy text", tint: copied ? Theme.teal : nil) { copyText() }
+                    .disabled(!hasText)
+                BoxIconButton(system: "xmark.circle.fill", help: "Clear text") { clearText() }
+                    .disabled(!hasText || model.isTyping)
+            }
+            .padding(.top, 3).padding(.trailing, 3)
+        }
         .overlay(alignment: .bottom) {
             // Drag the bottom edge to resize (panel follows); double-click to go back to auto-fit.
             ResizeGrip(
@@ -232,6 +248,18 @@ struct BubbleView: View {
         )
         .onPreferenceChange(TextHeightKey.self) { textContentHeight = $0 }
         .onAppear { reportHeight() }
+    }
+
+    private func copyText() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(model.composerText, forType: .string)
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+    }
+
+    private func clearText() {
+        model.composerText = ""
+        textBoxFocused = true
     }
 
     private func reportHeight() {
@@ -347,6 +375,7 @@ struct BubbleView: View {
 
             Spacer(minLength: 0)
 
+            modeMenu
             HeaderIconButton(system: "text.alignleft",
                              help: textBoxOpen ? "Collapse text box" : "Expand text box",
                              active: textBoxOpen) { onToggleTextBox() }
@@ -357,38 +386,35 @@ struct BubbleView: View {
         .background(WindowDragArea())
     }
 
-    // MARK: Mode picker — compact, bound to the shared mode (lock-step with Home/Settings)
+    // MARK: Mode menu — a header icon (tinted by the current mode); click for the list.
+    // Bound to the shared mode (lock-step with Home/Settings).
 
-    private var modePicker: some View {
+    private var modeMenu: some View {
         Menu {
-            Picker("Mode", selection: model.modeBinding) {
-                ForEach(TypingProfile.Mode.allCases, id: \.self) { m in
-                    Text("\(m.rawValue)  ·  \(m.speedTag)").tag(m)
+            ForEach(TypingProfile.Mode.allCases, id: \.self) { m in
+                Button { model.setMode(m) } label: {
+                    Label {
+                        Text("\(m.rawValue)  ·  \(m.speedTag)\(m == model.mode ? "   ✓" : "")")
+                    } icon: {
+                        Image(nsImage: ModeGlyph.image(m))
+                    }
                 }
             }
-            .pickerStyle(.inline)
-            .labelsHidden()
         } label: {
-            HStack(spacing: 7) {
-                Circle().fill(Theme.modeTint(model.mode)).frame(width: 7, height: 7)
-                Text(model.mode.rawValue).font(AppFont.inter(.semibold, 12.5)).foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1).layoutPriority(1)
-                Spacer(minLength: 4)
-                Text(model.mode.speedTag).font(AppFont.inter(.medium, 11)).foregroundStyle(Theme.textTertiary)
-                    .lineLimit(1).fixedSize()
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .semibold)).foregroundStyle(Theme.textTertiary)
-            }
-            .padding(.horizontal, 10).frame(height: 30).frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: Spacing.navRadius, style: .continuous).fill(Theme.creamSunken))
-            .overlay(RoundedRectangle(cornerRadius: Spacing.navRadius, style: .continuous).strokeBorder(Theme.strokeWell, lineWidth: 1))
-            .contentShape(Rectangle())
+            ModeGlyph(mode: model.mode)
+                .frame(width: 16, height: 16)
+                .frame(width: 22, height: 22)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(modeHover ? Theme.hoverFill : .clear))
+                .contentShape(Rectangle())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { modeHover = $0 }
         .disabled(resolvedPhase != .idle)
-        .help("Typing mode")
+        .help("Typing mode: \(model.mode.rawValue) · \(model.mode.speedTag)")
     }
 
     // MARK: Primary CTA — the one quick-paste button, fills the remaining height
@@ -457,6 +483,33 @@ struct BubbleView: View {
         }
     }
 
+}
+
+/// SwiftUI's TextEditor wraps an NSScrollView; with a mouse attached macOS draws a legacy,
+/// always-visible white scroller track that looks like a stray white bar. Switch the editor's
+/// scroll view to the transparent overlay style (thin bar only while scrolling).
+private struct OverlayScroller: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Probe() }
+    func updateNSView(_ v: NSView, context: Context) { (v as? Probe)?.apply() }
+
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); apply() }
+        func apply() {
+            DispatchQueue.main.async { [weak self] in
+                guard let root = self?.window?.contentView else { return }
+                Self.fix(root)
+            }
+        }
+        private static func fix(_ v: NSView) {
+            if let sv = v as? NSScrollView, sv.documentView is NSTextView {
+                sv.scrollerStyle = .overlay
+                sv.autohidesScrollers = true
+                sv.drawsBackground = false
+                sv.verticalScroller?.alphaValue = 1
+            }
+            v.subviews.forEach(fix)
+        }
+    }
 }
 
 /// Bottom-edge grab strip for the text box. An AppKit view so the panel's
@@ -548,6 +601,32 @@ private struct HeaderIconButton: View {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .fill(active ? Theme.tealFill : (hovering ? Theme.hoverFill : .clear))
                 )
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { hovering = $0 }
+    }
+}
+
+// MARK: - Small icon button inside the text box (copy / clear)
+
+private struct BoxIconButton: View {
+    let system: String
+    var help: String = ""
+    var tint: Color? = nil
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var isEnabled
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint ?? (hovering && isEnabled ? Theme.textPrimary : Theme.iconGray))
+                .frame(width: 24, height: 24)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(hovering && isEnabled ? Theme.hoverFill : .clear))
+                .contentShape(Rectangle())
+                .opacity(isEnabled ? 1 : 0.35)
         }
         .buttonStyle(.plain)
         .help(help)

@@ -66,7 +66,7 @@ struct ModeCard: View {
                         .frame(width: 18, height: 18)
                     if selected { Circle().fill(Theme.teal).frame(width: 9, height: 9) }
                 }
-                Circle().fill(Theme.modeTint(mode)).frame(width: 10, height: 10)
+                ModeGlyph(mode: mode).frame(width: 24, height: 24)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(mode.rawValue).font(AppFont.inter(.semibold, 15)).foregroundStyle(Theme.textPrimary)
                     Text(mode.subtitle).font(Typo.caption).foregroundStyle(Theme.textSecondary)
